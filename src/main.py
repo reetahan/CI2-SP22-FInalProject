@@ -91,7 +91,6 @@ def assign_treatments(profiles,covariates, cov_coeff, seed):
 def assign_outcomes(treatments,graph,profiles, covariates, cov_coeff, seed):
     np.random.seed(seed)
     confounding_alpha = np.random.uniform()
-
     age_cat = []
     if 'scaled_age' in covariates:
         age_cat = np.where(profiles['scaled_age'] < 0., -1., 1.)
@@ -104,9 +103,20 @@ def assign_outcomes(treatments,graph,profiles, covariates, cov_coeff, seed):
         else:
             values.append(profiles[cat])
     values = np.array(values)
+    confounding_propensities = propensity_linear_function(values,cov_coeff)
 
-    propensities = propensity_linear_function(values,cov_coeff)
+    V = []
+    for i in range(len(treatments)):
+        cur_neighbors = graph['neighbours'][graph['offsets'][i]:graph['offsets'][i]+graph['lengths'][i]]
+        v_i = np.sum(treatments[cur_neighbors])/len(cur_neighbors)
+        V.append(v_i)
+    V = np.array(V)
 
+    outcome_propensities = (1 - confounding_alpha)*V + confounding_alpha*confounding_propensities
+    
+    np.random.seed(seed)
+    outcomes = np.random.binomial(1, outcome_propensities)
+    return outcomes
 
 def train_test_node_split(sample,seed):
     np.random.seed(seed)
@@ -160,7 +170,7 @@ def main():
 
     seed = 87
     categories = ['I_like_books','I_like_movies','I_like_music','relation_to_smoking','scaled_age']
-    cat_coeff = gen_covar_coeff(covariates, seed)
+    cat_coeff = gen_covar_coeff(categories, seed)
 
     #one_time_graph_processing()
     
@@ -169,12 +179,11 @@ def main():
     
     treatments = assign_treatments(profiles,categories, cat_coeff, seed)
     outcomes = assign_outcomes(treatments, graph, profiles, categories, cat_coeff, seed)
+ 
 
-    '''
     sample, sample_translation = sample_graph(graph,seed)
     training_nodes, testing_nodes = train_test_node_split(sample,seed)
-    print(training_nodes)
-    print(testing_nodes)
-    '''
+
+
 if __name__ == '__main__':
     main()
