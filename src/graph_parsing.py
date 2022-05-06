@@ -21,7 +21,8 @@ def load_profiles(profile_file):
                       "relationships art_culture hobbies_interests science_technologies computers_internet education "
                       "sport movies travelling health companies_brands more")
     usecols = str.split("user_id public completion_percentage gender region last_login registration age "
-                        "completed_level_of_education sign_in_zodiac relation_to_casual_sex I_like_books ")
+                        "completed_level_of_education sign_in_zodiac relation_to_casual_sex I_like_books "
+                        "I_like_movies I_like_music relation_to_smoking")
 
 
     profiles = pd.read_csv(profile_file, names=names, index_col=False, usecols=usecols, header=None, sep='\t')
@@ -36,6 +37,9 @@ def load_profiles(profile_file):
     profiles['sign_in_zodiac'] = profiles['sign_in_zodiac'].isna()
     profiles['relation_to_casual_sex'] = profiles['relation_to_casual_sex'].isna()
     profiles['I_like_books'] = profiles['I_like_books'].isna()
+    profiles['I_like_movies'] = profiles['I_like_movies'].isna()
+    profiles['I_like_music'] = profiles['I_like_music'].isna()
+    profiles['relation_to_smoking'] = profiles['relation_to_smoking'].isna()
 
     profiles['last_login'] = pd.to_datetime(profiles['last_login'])
     profiles['registration'] = pd.to_datetime(profiles['registration'])
@@ -73,8 +77,10 @@ def second_profile_process(profiles):
                                   "age "
                                   "completed_level_of_education "
                                   "sign_in_zodiac "
-                                  "relation_to_casual_sex "
+                                  "relation_to_smoking "
                                   "I_like_books "
+                                  "I_like_music "
+                                  "I_like_movies "
                                   "recent_login "
                                   "old_school "
                                   "scaled_registration "

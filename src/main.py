@@ -3,6 +3,9 @@ from graph_parsing import *
 from time import sleep
 import numpy_indexed as npi
 
+def sigmoid_adj(x,a):
+    return 1/(1 + np.exp(-1*(x-a)))
+
 def sample_graph(graph,seed):
     #Let's use p-sampling
     np.random.seed(seed)
@@ -52,13 +55,58 @@ def sample_graph(graph,seed):
         'edge_list': new_edge_list}
     return sample_graph, translation
 
-def assign_treatments(graph,profiles):
-    treatments = []
+
+def propensity_linear_function(values,cov_coeff):
+    for i in range(len(values)):
+        values[i] *= cov_coeff[i]
+    confounding = np.sum(values,axis=0)
+    propensities = sigmoid_adj(confounding,len(values)/2.0)
+    return propensities
+    
+def gen_covar_coeff(covariates, seed):
+    np.random.seed(seed)
+    return np.random.uniform(size=len(covariates))
+
+def assign_treatments(profiles,covariates, cov_coeff, seed):
+    np.random.seed(seed)
+    
+    age_cat = []
+    if 'scaled_age' in covariates:
+        age_cat = np.where(profiles['scaled_age'] < 0., -1., 1.)
+        age_cat[np.isnan(profiles['scaled_age'])] = 0
+        age_cat[age_cat == -1] = 1
+    values = []
+
+    for cat in covariates:
+        if(cat == 'scaled_age'):
+            values.append(age_cat)
+        else:
+            values.append(profiles[cat])
+    values = np.array(values)
+
+    propensities = propensity_linear_function(values,cov_coeff)
+    treatments = np.random.binomial(1,propensities)
     return treatments
 
-def assign_outcomes(graph,profiles):
-    outcomes = []
-    return outcomes
+def assign_outcomes(treatments,graph,profiles, covariates, cov_coeff, seed):
+    np.random.seed(seed)
+    confounding_alpha = np.random.uniform()
+
+    age_cat = []
+    if 'scaled_age' in covariates:
+        age_cat = np.where(profiles['scaled_age'] < 0., -1., 1.)
+        age_cat[np.isnan(profiles['scaled_age'])] = 0
+        age_cat[age_cat == -1] = 1
+    values = []
+    for cat in covariates:
+        if(cat == 'scaled_age'):
+            values.append(age_cat)
+        else:
+            values.append(profiles[cat])
+    values = np.array(values)
+
+    propensities = propensity_linear_function(values,cov_coeff)
+
 
 def train_test_node_split(sample,seed):
     np.random.seed(seed)
@@ -109,17 +157,24 @@ def graph_processing(regional):
 
 
 def main():
+
+    seed = 87
+    categories = ['I_like_books','I_like_movies','I_like_music','relation_to_smoking','scaled_age']
+    cat_coeff = gen_covar_coeff(covariates, seed)
+
     #one_time_graph_processing()
+    
     graph, profiles = graph_processing(True)
     profiles = second_profile_process(profiles)
+    
+    treatments = assign_treatments(profiles,categories, cat_coeff, seed)
+    outcomes = assign_outcomes(treatments, graph, profiles, categories, cat_coeff, seed)
 
-    treatments = assign_treatments(graph,profiles)
-    outcomes = assign_outcomes(treatments, graph, profiles)
-
-    sample, sample_translation = sample_graph(graph,87)
-    training_nodes, testing_nodes = train_test_node_split(sample,87)
+    '''
+    sample, sample_translation = sample_graph(graph,seed)
+    training_nodes, testing_nodes = train_test_node_split(sample,seed)
     print(training_nodes)
     print(testing_nodes)
-
+    '''
 if __name__ == '__main__':
     main()
