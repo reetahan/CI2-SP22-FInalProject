@@ -1,0 +1,5 @@
+src/__pycache__
+data/soc-pokec-profiles.txt
+data/soc-pokec-relationships.txt
+data/links_processed.npz
+data/profiles.pkl
