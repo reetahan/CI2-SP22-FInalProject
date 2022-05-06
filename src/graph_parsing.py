@@ -1,10 +1,7 @@
 import os
 import argparse
-from collections import namedtuple
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-from time import sleep
 import time 
 
 
@@ -43,6 +40,7 @@ def load_profiles(profile_file):
     profiles['last_login'] = pd.to_datetime(profiles['last_login'])
     profiles['registration'] = pd.to_datetime(profiles['registration'])
     profiles['user_id'] = profiles['user_id'] - 1
+    profiles.set_index('user_id', inplace=True, drop=False)
 
     return profiles
 
@@ -66,11 +64,56 @@ def preprocess_data():
     
     return edge_list, profiles
 
+def second_profile_process(profiles):
+    final_features = str.split("public "
+                                  "completion_percentage "
+                                  "user_id "
+                                  "gender "
+                                  "region "
+                                  "age "
+                                  "completed_level_of_education "
+                                  "sign_in_zodiac "
+                                  "relation_to_casual_sex "
+                                  "I_like_books "
+                                  "recent_login "
+                                  "old_school "
+                                  "scaled_registration "
+                                  "scaled_age "
+                                  )
+    
+    profiles['recent_login'] = (profiles['last_login'] < pd.Timestamp(2012, 5, 1))
+    profiles['old_school'] = (profiles['registration'] < pd.Timestamp(2009, 1, 1))
+
+    profiles['scaled_registration'] = (profiles['registration'] - profiles['registration'].min()) / pd.offsets.Day(1)
+    profiles['scaled_registration'] = (profiles['scaled_registration'] - profiles['scaled_registration'].mean())/(profiles['scaled_registration'].std())
+
+    profiles['scaled_age'] = (profiles['age'] - profiles['age'].mean())/(profiles['age'].std())
+
+
+    cat_columns = profiles.select_dtypes(['category']).columns
+    profiles[cat_columns] = profiles[cat_columns].apply(lambda x: x.cat.codes)
+    profiles[cat_columns] = profiles[cat_columns].apply(lambda x: x.astype(np.int32))
+    bool_columns = profiles.select_dtypes([bool]).columns
+    profiles[bool_columns] = profiles[bool_columns].apply(lambda x: x.astype(np.int32))
+
+    profiles['age'][profiles['age'].isna()] = -1.
+
+    profiles['age'] = profiles['age'].astype(np.float32)
+    profiles['completion_percentage'] = profiles['completion_percentage'].astype(np.float32)
+
+    final_profile = {}
+    for feature in final_features:
+        final_profile[feature] = profiles[feature].values
+    final_profile = pd.DataFrame.from_dict(final_profile)
+    final_profile.set_index('user_id', inplace=True, drop=False)
+    return final_profile
 
 def preprocess_packed_adjacency_list(edge_list):
 
     orig_edge_list = edge_list.copy()
+    print(edge_list)
     edge_list = edge_list[edge_list[:, 0] != edge_list[:, 1], :]
+    print(edge_list)
     edge_list.sort(axis=-1)
     edge_list = np.unique(edge_list, axis=0)
 
@@ -82,6 +125,7 @@ def preprocess_packed_adjacency_list(edge_list):
         'offsets': adjacency_list.offsets,
         'lengths': adjacency_list.lengths,
         'vertex_index': adjacency_list.vertex_index,
+        'weights': adjacency_list.weights,
         'edge_list': orig_edge_list
     }
 
@@ -114,7 +158,6 @@ def subset_to_region(edge_list, profiles, regions=None):
     edge_in_region = np.isin(edge_list[:, 1], vertices_in_region)
     edge_list = edge_list[edge_in_region]
 
-
     present_user_ids = np.unique(edge_list)
     present_user_indicator = np.isin(profiles['user_id'].values, present_user_ids)
     regional_profiles = profiles[present_user_indicator]
@@ -128,50 +171,8 @@ def subset_to_region(edge_list, profiles, regions=None):
     edge_list = user_id_to_index[edge_list]
 
     regional_profiles.to_pickle("../data/regional_profiles.pkl")
-    #np.savez_compressed('regional_links.npz', edge_list=edge_list)
+
     packed_adjacency_list_data = preprocess_packed_adjacency_list(edge_list)
     np.savez_compressed('../data/regional_links.npz', **packed_adjacency_list_data)
 
-
-def process_pokec_attributes(profiles):
-
-    included_features = str.split("public "
-                                  "completion_percentage "
-                                  "gender "
-                                  "region "
-                                  "age "
-                                  "completed_level_of_education "
-                                  "sign_in_zodiac "
-                                  "relation_to_casual_sex "
-                                  "I_like_books "
-                                  "recent_login "
-                                  "old_school "
-                                  "scaled_registration "
-                                  "scaled_age "
-                                  )
-
-    profiles['recent_login'] = (profiles['last_login'] < pd.Timestamp(2012, 5, 1))
-    profiles['old_school'] = (profiles['registration'] < pd.Timestamp(2009, 1, 1))
-
-    profiles['scaled_registration'] = (profiles['registration'] - profiles['registration'].min()) / pd.offsets.Day(1)
-    profiles['scaled_registration'] = (profiles['scaled_registration'] - profiles['scaled_registration'].mean())/(profiles['scaled_registration'].std())
-
-    profiles['scaled_age'] = (profiles['age'] - profiles['age'].mean())/(profiles['age'].std())
-
-
-    cat_columns = profiles.select_dtypes(['category']).columns
-    profiles[cat_columns] = profiles[cat_columns].apply(lambda x: x.cat.codes)
-    profiles[cat_columns] = profiles[cat_columns].apply(lambda x: x.astype(np.int32))
-    bool_columns = profiles.select_dtypes([bool]).columns
-    profiles[bool_columns] = profiles[bool_columns].apply(lambda x: x.astype(np.int32))
-
-    profiles['age'][profiles['age'].isna()] = -1.
-
-    profiles['age'] = profiles['age'].astype(np.float32)
-    profiles['completion_percentage'] = profiles['completion_percentage'].astype(np.float32)
-
-    pokec_features = {}
-    for feature in included_features:
-        pokec_features[feature] = profiles[feature].values
-
-    return pokec_features
+   

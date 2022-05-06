@@ -89,6 +89,7 @@ def create_packed_adjacency_list(adjacency_list):
     -------
     packed_adjacency_list: A PackedAdjacencyList which represents the same graph.
     """
+
     num_vertex = len(adjacency_list)
 
     lengths = np.empty(num_vertex, dtype=np.int32)
@@ -101,6 +102,7 @@ def create_packed_adjacency_list(adjacency_list):
         neighbours_lists.append(neighbours_i)
         weights_lists.append(weights_i)
         lengths[i] = len(neighbours_i)
+
 
     neighbours = np.concatenate(neighbours_lists)
     weights = np.concatenate(weights_lists)
