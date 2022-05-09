@@ -117,9 +117,7 @@ def second_profile_process(profiles):
 def preprocess_packed_adjacency_list(edge_list):
 
     orig_edge_list = edge_list.copy()
-    print(edge_list)
     edge_list = edge_list[edge_list[:, 0] != edge_list[:, 1], :]
-    print(edge_list)
     edge_list.sort(axis=-1)
     edge_list = np.unique(edge_list, axis=0)
 

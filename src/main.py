@@ -1,10 +1,82 @@
 import numpy as np
 from graph_parsing import *
 from time import sleep
+import networkx as nx
 import numpy_indexed as npi
+from argparse import Namespace
+ 
+
+
+
 
 def sigmoid_adj(x,a):
     return 1/(1 + np.exp(-1*(x-a)))
+
+def non_joint_embedding(graph, profiles):
+    pass 
+
+def run_embedded_training(embedding):
+    '''
+    import tensorflow as tf
+    print(tf.__version__)
+    embedding = tf.make_tensor_proto(embedding)
+    embedding = tf.make_ndarray(embedding)
+    print(embedding)
+    print(embedding.shape)
+    for i in range(int(embedding.shape[1])):
+        a = int(embedding[i])
+        temp.append(i)
+    '''
+    #embedding = np.loadtxt("asne_pkg/temp_embedding.txt")
+    sleep(30)
+    treatment = np.loadtxt("temp_treatments.txt")
+    outcomes = np.loadtxt("temp_outcomes.txt")
+    print('Treatment:')
+    print(treatment)
+    print('Embedding:')
+    print(temp)
+    print('Outcomes:')
+    print(outcomes)
+
+def gen_embed_train(sample,sample_translation,profiles, covariates):
+    age_cat = []
+    if 'scaled_age' in covariates:
+        age_cat = np.where(profiles['scaled_age'] < 0., -1., 1.)
+        age_cat[np.isnan(profiles['scaled_age'])] = 0
+        age_cat[age_cat == -1] = 1
+
+    raw_sample_graph = nx.from_edgelist(sample['edge_list'])
+    cov_data = {}
+    for sample_vtx in sample['vertex_index']:
+        orig_vtx = sample_translation[sample_vtx]
+        cur_feat_list = []
+        for cat in covariates:
+            if(cat == 'scaled_age'):
+                cur_feat_list.append(int(age_cat[orig_vtx]))
+            else:
+                cur_feat_list.append(int(profiles[cat].iloc[[orig_vtx]]))
+        cov_data[sample_vtx] = cur_feat_list
+
+    return raw_sample_graph, cov_data
+
+def asne_wrapper(graph,features):
+    my_args = {'edge_path':'unused','features_path':'unused','output_path':'test_output.csv',
+                'node_embedding_dimensions':16,'feature_embedding_dimensions':16,'batch_size':64,
+                'alpha':1.0,'epochs':15,'negative_samples': 50}
+    arg_ns = Namespace(**my_args)
+
+    from asne_pkg.main import run_asne
+    run_asne(arg_ns,graph,features)
+
+
+def gen_train_test(profiles,sample, sample_translation, treatments, outcomes, training_nodes, testing_nodes):
+    pass
+
+def model_train():
+    pass
+
+def model_test():
+    pass
 
 def sample_graph(graph,seed):
     #Let's use p-sampling
@@ -165,6 +237,9 @@ def graph_processing(regional):
 
     return graph, profiles
 
+def temp_writes(treatments, outcomes):
+    np.savetxt("temp_treatments.txt", treatments)
+    np.savetxt("temp_outcomes.txt", outcomes)
 
 def main():
 
@@ -177,12 +252,20 @@ def main():
     graph, profiles = graph_processing(True)
     profiles = second_profile_process(profiles)
     
+
     treatments = assign_treatments(profiles,categories, cat_coeff, seed)
     outcomes = assign_outcomes(treatments, graph, profiles, categories, cat_coeff, seed)
+    temp_writes(treatments,outcomes)
  
 
     sample, sample_translation = sample_graph(graph,seed)
     training_nodes, testing_nodes = train_test_node_split(sample,seed)
+
+    graph_embed, graph_features = gen_embed_train(sample,sample_translation,profiles, categories)
+    asne_wrapper(graph_embed, graph_features)
+    
+
+
 
 
 if __name__ == '__main__':
