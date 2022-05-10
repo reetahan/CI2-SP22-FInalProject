@@ -4,39 +4,114 @@ from time import sleep
 import networkx as nx
 import numpy_indexed as npi
 from argparse import Namespace
- 
-
-
+from flaml import AutoML
+from sklearn.metrics import mean_absolute_error as mae
+import pickle
+import sys
+from os.path import exists
 
 
 def sigmoid_adj(x,a):
     return 1/(1 + np.exp(-1*(x-a)))
 
-def non_joint_embedding(graph, profiles):
-    pass 
+def non_joint_embedding(graph,features, treatment, outcomes, sample, sample_translation, training_nodes, \
+    testing_nodes, seed):
+    
+    to_save = True
+    automl_file = "output/non_joint_" + str(seed) + "_automl.pkl"
+    embed_file = "output/non_joint_" + str(seed) + "_cur_embed.csv"
+    sample_treatments_file = "output/non_joint_" + str(seed) + "_s_t.txt"
+    sample_outcomes_file = "output/non_joint_" + str(seed) + "_s_o.txt"
 
-def run_embedded_training(embedding):
-    '''
-    import tensorflow as tf
-    print(tf.__version__)
-    embedding = tf.make_tensor_proto(embedding)
-    embedding = tf.make_ndarray(embedding)
-    print(embedding)
-    print(embedding.shape)
-    for i in range(int(embedding.shape[1])):
-        a = int(embedding[i])
-        temp.append(i)
-    '''
-    #embedding = np.loadtxt("asne_pkg/temp_embedding.txt")
-    sleep(30)
-    treatment = np.loadtxt("temp_treatments.txt")
-    outcomes = np.loadtxt("temp_outcomes.txt")
-    print('Treatment:')
-    print(treatment)
-    print('Embedding:')
-    print(temp)
-    print('Outcomes:')
-    print(outcomes)
+    
+    total_epochs = 16
+    sample_treatments = []
+    sample_outcomes = []
+    for sample_vtx in sample['vertex_index']:
+        orig_vtx = sample_translation[sample_vtx]
+        sample_treatments.append(treatment[orig_vtx])
+        sample_outcomes.append(outcomes[orig_vtx])
+    sample_treatments = np.array(sample_treatments)
+    np.savetxt(sample_treatments_file, sample_treatments)
+    sample_outcomes = np.array(sample_outcomes)
+    np.savetxt(sample_outcomes_file, sample_outcomes)
+
+    
+    my_args = {'edge_path':'unused','features_path':'unused','output_path':embed_file,'epoch_file':'unused',
+                'node_embedding_dimensions':8,'feature_embedding_dimensions':8,'batch_size':64,
+                'alpha':1.0,'epochs':16,'negative_samples': 15}
+    arg_ns = Namespace(**my_args)
+
+    from asne_pkg.main import run_asne
+    run_asne(arg_ns,graph,features)
+    cur_embed = pd.read_csv(embed_file)
+    cur_loss = run_embedded_training(sample_treatments, cur_embed, sample_outcomes, training_nodes, \
+        testing_nodes, to_save, automl_file)
+    sys.stdout.flush()
+    print('MAE Loss: ' + str(cur_loss))
+    sys.stdout.flush()
+
+    return automl_file, embed_file, sample_treatments, sample_outcomes
+
+def prediction(sample_treatments, model_f, embedding_f,predict_outfile):
+    print(sample_treatments)
+    print(model_f)
+    print(embedding_f)
+    print(predict_outfile)
+    X_ = pd.read_csv(embedding_f)
+    X = X_.drop(["id"],axis=1)
+    X["treatments"] = sample_treatments
+
+    with open(model_f, "rb") as f:
+        automl = pickle.load(f)
+
+    X = X.to_numpy()
+    
+    outcomes = automl.predict(X)
+    estimator = np.average(outcomes)
+    print(estimator)
+
+    if(not exists(predict_outfile)):
+        with open(predict_outfile, 'w+') as fp:
+            pass
+    current_est_list = np.loadtxt(predict_outfile)
+    current_est_list = np.append(current_est_list,estimator)
+    np.savetxt(predict_outfile,current_est_list)
+
+
+
+
+def run_embedded_training(treatments, embedding, outcomes, training_nodes, testing_nodes, to_save, outfile):
+    outcomes = outcomes.reshape(-1,1)
+    data = embedding.drop(["id"],axis=1)
+    data["treatment"] = treatments
+    X_train = data.loc[training_nodes] 
+    y_train = outcomes[training_nodes]
+    X_test = data.loc[testing_nodes]
+    y_test = outcomes[testing_nodes]
+
+    print('X_train')
+    print(X_train)
+    print('y_train')
+    print(y_train)
+
+    automl = AutoML()
+    automl_settings = {
+            "metric": 'mae',
+            "estimator_list": 'auto',
+            "task": 'classification',
+            "time_budget": 250,
+            "log_file_name": "./nj_automl_factual.log",
+            }
+    automl.fit(X_train=X_train, y_train=y_train,**automl_settings)
+    y_pred = automl.predict(X_test)
+    if(to_save):
+        with open(outfile, "wb") as f:
+            pickle.dump(automl, f, pickle.HIGHEST_PROTOCOL)
+
+    return mae(y_test,y_pred)
+    
+   
 
 def gen_embed_train(sample,sample_translation,profiles, covariates):
     age_cat = []
@@ -59,24 +134,55 @@ def gen_embed_train(sample,sample_translation,profiles, covariates):
 
     return raw_sample_graph, cov_data
 
-def asne_wrapper(graph,features):
-    my_args = {'edge_path':'unused','features_path':'unused','output_path':'test_output.csv',
-                'node_embedding_dimensions':16,'feature_embedding_dimensions':16,'batch_size':64,
-                'alpha':1.0,'epochs':15,'negative_samples': 50}
-    arg_ns = Namespace(**my_args)
+def asne_wrapper(graph,features, treatment, outcomes, sample, sample_translation, training_nodes, \
+    testing_nodes, seed):
+    
 
-    from asne_pkg.main import run_asne
-    run_asne(arg_ns,graph,features)
+    epoch_file = str(seed) + "_epoch_info.txt"
+    automl_file = "output/" + str(seed) + "_automl.pkl"
+    embed_file = "output/" + str(seed) + "_cur_embed.csv"
+    sample_treatments_file = "output/" + str(seed) + "_s_t.txt"
+    sample_outcomes_file = "output/" + str(seed) + "_s_o.txt"
 
+    
+    total_epochs = 15
+    sample_treatments = []
+    sample_outcomes = []
+    for sample_vtx in sample['vertex_index']:
+        orig_vtx = sample_translation[sample_vtx]
+        sample_treatments.append(treatment[orig_vtx])
+        sample_outcomes.append(outcomes[orig_vtx])
+    sample_treatments = np.array(sample_treatments)
+    np.savetxt(sample_treatments_file, sample_treatments)
+    sample_outcomes = np.array(sample_outcomes)
+    np.savetxt(sample_outcomes_file, sample_outcomes)
 
-def gen_train_test(profiles,sample, sample_translation, treatments, outcomes, training_nodes, testing_nodes):
-    pass
+    to_save = False
+    np.savetxt(epoch_file,np.array([0.0]))
+    for i in range(total_epochs):
+        sys.stdout.flush()
+        print('Current Epoch: ' + str(i))
+        sys.stdout.flush()
+        my_args = {'edge_path':'unused','features_path':'unused','output_path':embed_file,'epoch_file':epoch_file,
+                    'node_embedding_dimensions':8,'feature_embedding_dimensions':8,'batch_size':64,
+                    'alpha':1.0,'epochs':i,'negative_samples': 15}
+        arg_ns = Namespace(**my_args)
 
-def model_train():
-    pass
+        from asne_pkg.main import run_asne
+        run_asne(arg_ns,graph,features)
+        cur_embed = pd.read_csv(embed_file)
+        if(i == total_epochs - 1):
+            to_save = True
+        cur_loss = run_embedded_training(sample_treatments, cur_embed, sample_outcomes, training_nodes, \
+            testing_nodes, to_save, automl_file)
+        cur_losses = np.loadtxt(epoch_file)
+        cur_losses = np.append(cur_losses,cur_loss)
+        sys.stdout.flush()
+        print('Current MAE Loss: ' + str(cur_losses))
+        sys.stdout.flush()
+        np.savetxt(epoch_file,cur_losses)
+    return automl_file, embed_file, sample_treatments, sample_outcomes
 
-def model_test():
-    pass
 
 def sample_graph(graph,seed):
     #Let's use p-sampling
@@ -237,35 +343,93 @@ def graph_processing(regional):
 
     return graph, profiles
 
+def final_result(predict_outfile):
+    estimators = np.loadtxt(predict_outfile)
+    m = np.mean(estimators)
+    ste = np.std(estimators)/np.sqrt(len(estimators))
+    print("Peer Influence Estimator of: " + str(m) + " with standard error of " + str(ste) + ".")
+
 def temp_writes(treatments, outcomes):
     np.savetxt("temp_treatments.txt", treatments)
     np.savetxt("temp_outcomes.txt", outcomes)
 
 def main():
 
-    seed = 87
+    init_processing = False
+    predict_only = True
+    final_res_only = False
+    non_joint = False
+    #seed = 87
+    #seed = 42
+    #seed = 103
+    #seed = 65
+    seed = 233
+    #seed = 32
+    #seed = 83
+    #seed = 44
+    #seed = 55
+    #seed = 19
+
+    if(final_res_only):
+        if(non_joint):
+            final_result("output/non_joint_predicted_estimators.txt")
+        else:
+            final_result("output/predicted_estimators.txt")
+        return
+
+    if(predict_only):
+        if(not non_joint):
+            model_f= "output/" + str(seed) + "_automl.pkl"
+            embedding_f = "output/" + str(seed) + "_cur_embed.csv"
+            sample_treatments_file = "output/" + str(seed) + "_s_t.txt"
+            sample_treatments = np.loadtxt(sample_treatments_file)
+            prediction(sample_treatments,model_f,embedding_f,"output/predicted_estimators.txt")
+        else:
+            model_f= "output/non_joint_" + str(seed) + "_automl.pkl"
+            embedding_f = "output/non_joint_" + str(seed) + "_cur_embed.csv"
+            sample_treatments_file = "output/non_joint_" + str(seed) + "_s_t.txt"
+            sample_treatments = np.loadtxt(sample_treatments_file)
+            prediction(sample_treatments,model_f,embedding_f,"output/non_joint_predicted_estimators.txt")
+        return
+
+
     categories = ['I_like_books','I_like_movies','I_like_music','relation_to_smoking','scaled_age']
     cat_coeff = gen_covar_coeff(categories, seed)
 
-    #one_time_graph_processing()
+    if(init_processing):
+        one_time_graph_processing()
     
     graph, profiles = graph_processing(True)
     profiles = second_profile_process(profiles)
-    
+    print('Finished graph input processing')
 
     treatments = assign_treatments(profiles,categories, cat_coeff, seed)
     outcomes = assign_outcomes(treatments, graph, profiles, categories, cat_coeff, seed)
     temp_writes(treatments,outcomes)
- 
+    print('Finished treatment and outcome simulated assignment')
 
     sample, sample_translation = sample_graph(graph,seed)
+    print('Finished sampling')
     training_nodes, testing_nodes = train_test_node_split(sample,seed)
+    print('Finished train-test split')
 
     graph_embed, graph_features = gen_embed_train(sample,sample_translation,profiles, categories)
-    asne_wrapper(graph_embed, graph_features)
-    
+    print('Finished generating training set')
 
+    if(non_joint):
+        model_f, embedding_f, sample_treatments, sample_outcomes = non_joint_embedding(graph_embed, graph_features,treatments, \
+        outcomes,sample,sample_translation, training_nodes, testing_nodes, seed)
+        print('Finished training')
 
+        prediction(sample_treatments,model_f,embedding_f,"output/non_joint_predicted_estimators.txt")
+        print('Finished predictions on sample')
+    else:
+        model_f, embedding_f, sample_treatments, sample_outcomes = asne_wrapper(graph_embed, graph_features,treatments, \
+            outcomes,sample,sample_translation, training_nodes, testing_nodes, seed)
+        print('Finished training')
+
+        prediction(sample_treatments,model_f,embedding_f,"output/predicted_estimators.txt")
+        print('Finished predictions on sample')
 
 
 if __name__ == '__main__':

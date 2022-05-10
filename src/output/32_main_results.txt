@@ -1,0 +1,9 @@
+Finished graph input processing
+Finished treatment and outcome simulated assignment
+Finished sampling
+Finished train-test split
+Finished generating training set
+Current Epoch: 0
+
+Saving the embedding.
+
