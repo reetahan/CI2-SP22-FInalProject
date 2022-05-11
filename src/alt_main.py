@@ -4,185 +4,19 @@ from time import sleep
 import networkx as nx
 import numpy_indexed as npi
 from argparse import Namespace
-from flaml import AutoML
-from sklearn.metrics import mean_absolute_error as mae
+from sklearn.metrics import mean_absolute_error as mae, confusion_matrix
 import pickle
+from scipy.io import mmwrite
 import sys
 from os.path import exists
+
 
 
 def sigmoid_adj(x,a):
     return 1/(1 + np.exp(-1*(x-a)))
 
-def non_joint_embedding(graph,features, treatment, outcomes, sample, sample_translation, training_nodes, \
-    testing_nodes, seed):
+def community_generation(graph, covariates, profiles):
     
-    to_save = True
-    automl_file = "output/non_joint_" + str(seed) + "_automl.pkl"
-    embed_file = "output/non_joint_" + str(seed) + "_cur_embed.csv"
-    sample_treatments_file = "output/non_joint_" + str(seed) + "_s_t.txt"
-    sample_outcomes_file = "output/non_joint_" + str(seed) + "_s_o.txt"
-
-    
-    total_epochs = 16
-    sample_treatments = []
-    sample_outcomes = []
-    for sample_vtx in sample['vertex_index']:
-        orig_vtx = sample_translation[sample_vtx]
-        sample_treatments.append(treatment[orig_vtx])
-        sample_outcomes.append(outcomes[orig_vtx])
-    sample_treatments = np.array(sample_treatments)
-    np.savetxt(sample_treatments_file, sample_treatments)
-    sample_outcomes = np.array(sample_outcomes)
-    np.savetxt(sample_outcomes_file, sample_outcomes)
-
-    
-    my_args = {'edge_path':'unused','features_path':'unused','output_path':embed_file,'epoch_file':'unused',
-                'node_embedding_dimensions':8,'feature_embedding_dimensions':8,'batch_size':64,
-                'alpha':1.0,'epochs':16,'negative_samples': 15}
-    arg_ns = Namespace(**my_args)
-
-    from asne_pkg.main import run_asne
-    run_asne(arg_ns,graph,features)
-    cur_embed = pd.read_csv(embed_file)
-    cur_loss = run_embedded_training(sample_treatments, cur_embed, sample_outcomes, training_nodes, \
-        testing_nodes, to_save, automl_file)
-    sys.stdout.flush()
-    print('MAE Loss: ' + str(cur_loss))
-    sys.stdout.flush()
-
-    return automl_file, embed_file, sample_treatments, sample_outcomes
-
-def prediction(sample_treatments, model_f, embedding_f,predict_outfile):
-    print(sample_treatments)
-    print(model_f)
-    print(embedding_f)
-    print(predict_outfile)
-    X_ = pd.read_csv(embedding_f)
-    X = X_.drop(["id"],axis=1)
-    X["treatments"] = sample_treatments
-
-    with open(model_f, "rb") as f:
-        automl = pickle.load(f)
-
-    X = X.to_numpy()
-    
-    outcomes = automl.predict(X)
-    estimator = np.average(outcomes)
-    print(estimator)
-
-    if(not exists(predict_outfile)):
-        with open(predict_outfile, 'w+') as fp:
-            pass
-    current_est_list = np.loadtxt(predict_outfile)
-    current_est_list = np.append(current_est_list,estimator)
-    np.savetxt(predict_outfile,current_est_list)
-
-
-
-
-def run_embedded_training(treatments, embedding, outcomes, training_nodes, testing_nodes, to_save, outfile):
-    outcomes = outcomes.reshape(-1,1)
-    data = embedding.drop(["id"],axis=1)
-    data["treatment"] = treatments
-    X_train = data.loc[training_nodes] 
-    y_train = outcomes[training_nodes]
-    X_test = data.loc[testing_nodes]
-    y_test = outcomes[testing_nodes]
-
-    print('X_train')
-    print(X_train)
-    print('y_train')
-    print(y_train)
-
-    automl = AutoML()
-    automl_settings = {
-            "metric": 'mae',
-            "estimator_list": 'auto',
-            "task": 'classification',
-            "time_budget": 250,
-            "log_file_name": "./nj_automl_factual.log",
-            }
-    automl.fit(X_train=X_train, y_train=y_train,**automl_settings)
-    y_pred = automl.predict(X_test)
-    if(to_save):
-        with open(outfile, "wb") as f:
-            pickle.dump(automl, f, pickle.HIGHEST_PROTOCOL)
-
-    return mae(y_test,y_pred)
-    
-   
-
-def gen_embed_train(sample,sample_translation,profiles, covariates):
-    age_cat = []
-    if 'scaled_age' in covariates:
-        age_cat = np.where(profiles['scaled_age'] < 0., -1., 1.)
-        age_cat[np.isnan(profiles['scaled_age'])] = 0
-        age_cat[age_cat == -1] = 1
-
-    raw_sample_graph = nx.from_edgelist(sample['edge_list'])
-    cov_data = {}
-    for sample_vtx in sample['vertex_index']:
-        orig_vtx = sample_translation[sample_vtx]
-        cur_feat_list = []
-        for cat in covariates:
-            if(cat == 'scaled_age'):
-                cur_feat_list.append(int(age_cat[orig_vtx]))
-            else:
-                cur_feat_list.append(int(profiles[cat].iloc[[orig_vtx]]))
-        cov_data[sample_vtx] = cur_feat_list
-
-    return raw_sample_graph, cov_data
-
-def asne_wrapper(graph,features, treatment, outcomes, sample, sample_translation, training_nodes, \
-    testing_nodes, seed):
-    
-
-    epoch_file = str(seed) + "_epoch_info.txt"
-    automl_file = "output/" + str(seed) + "_automl.pkl"
-    embed_file = "output/" + str(seed) + "_cur_embed.csv"
-    sample_treatments_file = "output/" + str(seed) + "_s_t.txt"
-    sample_outcomes_file = "output/" + str(seed) + "_s_o.txt"
-
-    
-    total_epochs = 15
-    sample_treatments = []
-    sample_outcomes = []
-    for sample_vtx in sample['vertex_index']:
-        orig_vtx = sample_translation[sample_vtx]
-        sample_treatments.append(treatment[orig_vtx])
-        sample_outcomes.append(outcomes[orig_vtx])
-    sample_treatments = np.array(sample_treatments)
-    np.savetxt(sample_treatments_file, sample_treatments)
-    sample_outcomes = np.array(sample_outcomes)
-    np.savetxt(sample_outcomes_file, sample_outcomes)
-
-    to_save = False
-    np.savetxt(epoch_file,np.array([0.0]))
-    for i in range(total_epochs):
-        sys.stdout.flush()
-        print('Current Epoch: ' + str(i))
-        sys.stdout.flush()
-        my_args = {'edge_path':'unused','features_path':'unused','output_path':embed_file,'epoch_file':epoch_file,
-                    'node_embedding_dimensions':8,'feature_embedding_dimensions':8,'batch_size':64,
-                    'alpha':1.0,'epochs':i,'negative_samples': 15}
-        arg_ns = Namespace(**my_args)
-
-        from asne_pkg.main import run_asne
-        run_asne(arg_ns,graph,features)
-        cur_embed = pd.read_csv(embed_file)
-        if(i == total_epochs - 1):
-            to_save = True
-        cur_loss = run_embedded_training(sample_treatments, cur_embed, sample_outcomes, training_nodes, \
-            testing_nodes, to_save, automl_file)
-        cur_losses = np.loadtxt(epoch_file)
-        cur_losses = np.append(cur_losses,cur_loss)
-        sys.stdout.flush()
-        print('Current MAE Loss: ' + str(cur_losses))
-        sys.stdout.flush()
-        np.savetxt(epoch_file,cur_losses)
-    return automl_file, embed_file, sample_treatments, sample_outcomes
-
 
 def sample_graph(graph,seed):
     #Let's use p-sampling
@@ -245,7 +79,7 @@ def gen_covar_coeff(covariates, seed):
     np.random.seed(seed)
     return np.random.uniform(size=len(covariates))
 
-def assign_treatments(profiles,covariates, cov_coeff, seed):
+def assign_treatments(profiles,covariates, cov_coeff, seed,all_x): 
     np.random.seed(seed)
     
     age_cat = []
@@ -264,6 +98,10 @@ def assign_treatments(profiles,covariates, cov_coeff, seed):
 
     propensities = propensity_linear_function(values,cov_coeff)
     treatments = np.random.binomial(1,propensities)
+    if(all_x == 0):
+        treatments = np.zeros(len(propensities))
+    if(all_x == 1):
+        treatments = np.ones(len(propensities))
     return treatments
 
 def assign_outcomes(treatments,graph,profiles, covariates, cov_coeff, seed):
@@ -356,10 +194,9 @@ def temp_writes(treatments, outcomes):
 def main():
 
     init_processing = False
-    predict_only = False
-    final_res_only = True
-    non_joint = True
-    #seed = 87
+    final_res_only = False
+    all_x = 0
+    seed = 87
     #seed = 42
     #seed = 103
     #seed = 65
@@ -367,7 +204,7 @@ def main():
     #seed = 32
     #seed = 83
     #seed = 44
-    seed = 55
+    #seed = 55
     #seed = 19
 
     if(final_res_only):
@@ -376,22 +213,6 @@ def main():
         else:
             final_result("output/predicted_estimators.txt")
         return
-
-    if(predict_only):
-        if(not non_joint):
-            model_f= "output/" + str(seed) + "_automl.pkl"
-            embedding_f = "output/" + str(seed) + "_cur_embed.csv"
-            sample_treatments_file = "output/" + str(seed) + "_s_t.txt"
-            sample_treatments = np.loadtxt(sample_treatments_file)
-            prediction(sample_treatments,model_f,embedding_f,"output/predicted_estimators.txt")
-        else:
-            model_f= "output/non_joint_" + str(seed) + "_automl.pkl"
-            embedding_f = "output/non_joint_" + str(seed) + "_cur_embed.csv"
-            sample_treatments_file = "output/non_joint_" + str(seed) + "_s_t.txt"
-            sample_treatments = np.loadtxt(sample_treatments_file)
-            prediction(sample_treatments,model_f,embedding_f,"output/non_joint_predicted_estimators.txt")
-        return
-
 
     categories = ['I_like_books','I_like_movies','I_like_music','relation_to_smoking','scaled_age']
     cat_coeff = gen_covar_coeff(categories, seed)
@@ -403,34 +224,28 @@ def main():
     profiles = second_profile_process(profiles)
     print('Finished graph input processing')
 
-    treatments = assign_treatments(profiles,categories, cat_coeff, seed)
+    treatments = assign_treatments(profiles,categories, cat_coeff, seed,all_x)
     outcomes = assign_outcomes(treatments, graph, profiles, categories, cat_coeff, seed)
     temp_writes(treatments,outcomes)
     print('Finished treatment and outcome simulated assignment')
 
+    communities = community_generation(graph, profiles, categories)
+    print('Finished community detection!')
+
     sample, sample_translation = sample_graph(graph,seed)
     print('Finished sampling')
+
+    
+
+
+    
     training_nodes, testing_nodes = train_test_node_split(sample,seed)
     print('Finished train-test split')
 
-    graph_embed, graph_features = gen_embed_train(sample,sample_translation,profiles, categories)
-    print('Finished generating training set')
+    print(sample)
+    print(training_nodes)
 
-    if(non_joint):
-        model_f, embedding_f, sample_treatments, sample_outcomes = non_joint_embedding(graph_embed, graph_features,treatments, \
-        outcomes,sample,sample_translation, training_nodes, testing_nodes, seed)
-        print('Finished training')
-
-        prediction(sample_treatments,model_f,embedding_f,"output/non_joint_predicted_estimators.txt")
-        print('Finished predictions on sample')
-    else:
-        model_f, embedding_f, sample_treatments, sample_outcomes = asne_wrapper(graph_embed, graph_features,treatments, \
-            outcomes,sample,sample_translation, training_nodes, testing_nodes, seed)
-        print('Finished training')
-
-        prediction(sample_treatments,model_f,embedding_f,"output/predicted_estimators.txt")
-        print('Finished predictions on sample')
-
+    
 
 if __name__ == '__main__':
     main()
