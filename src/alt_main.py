@@ -16,7 +16,11 @@ def sigmoid_adj(x,a):
     return 1/(1 + np.exp(-1*(x-a)))
 
 def community_generation(graph, covariates, profiles):
-    
+    adj_mat = np.zeros((len(graph['vertex_index']),len(graph['vertex_index'])))
+    attrs = np.zeros((len(graph['vertex_index']),len(covariates)))
+
+    for i in range(len(graph['vertex_index'])):
+        cur_neighbors = graph["neighbours"][offsets_to_check[i]:offsets_to_check[i]+lengths_to_check[i]]
 
 def sample_graph(graph,seed):
     #Let's use p-sampling

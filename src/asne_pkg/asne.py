@@ -98,7 +98,7 @@ class ASNE:
 
             self.combined_embed = tf.cast(tf.concat([self.node_embed, self.args.alpha*self.feature_embed], 1), tf.float32)
 
-            self.loss = 0.8*self.try_model() + tf.reduce_mean(tf.nn.sampled_softmax_loss(weights=self.noise_embedding,
+            self.loss = self.try_model() + tf.reduce_mean(tf.nn.sampled_softmax_loss(weights=self.noise_embedding,
                                                               biases=self.noise_bias,
                                                               labels=self.right_nodes,
                                                               inputs=self.combined_embed,
@@ -198,5 +198,5 @@ class ASNE:
         embedding.to_csv(self.args.output_path, index=None)
 
     def try_model(self):
-        return self.epoch_info[self.epoch_count] if self.epoch_info != None else 0
+        return self.epoch_info[self.epoch_count] if self.epoch_info is not None else 0
 

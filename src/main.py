@@ -31,7 +31,7 @@ def non_joint_embedding(graph,features, treatment, outcomes, sample, sample_tran
         sample_outcomes_file = "output/non_joint_" + str(all_x) + "_" + str(seed) + "_s_o.txt"
 
     
-    total_epochs = 1
+    total_epochs = 10
     sample_treatments = []
     sample_outcomes = []
     for sample_vtx in sample['vertex_index']:
@@ -122,7 +122,7 @@ def run_embedded_training(treatments, embedding, outcomes, training_nodes, testi
             "metric": 'mae',
             "estimator_list": 'auto',
             "task": 'classification',
-            "time_budget": 20,
+            "time_budget": 240,
             "log_file_name": "./nj_automl_factual.log",
             }
     automl.fit(X_train=X_train, y_train=y_train,**automl_settings)
@@ -141,9 +141,9 @@ def run_embedded_training(treatments, embedding, outcomes, training_nodes, testi
     print('F1-Score: ' + str(f1))
 
     if(to_save):
-        fname = str(seed) + "_auc_plot.png"
+        fname = "output/" + str(seed) + "_auc_plot.png"
         if(nj):
-            fname = "nj_" + str(seed) + "_auc_plot.png"
+            fname = "output/nj_" + str(seed) + "_auc_plot.png"
         fpr, tpr, threshold = roc_curve(y_test, y_pred)
         roc_auc = auc(fpr, tpr)
         plt.title('Receiver Operating Characteristic')
@@ -200,7 +200,7 @@ def asne_wrapper(graph,features, treatment, outcomes, sample, sample_translation
         sample_treatments_file = "output/" + str(all_x) + "_" + str(seed) + "_s_t.txt"
         sample_outcomes_file = "output/" + str(all_x) + "_" + str(seed) + "_s_o.txt"
     
-    total_epochs = 1
+    total_epochs = 10
     sample_treatments = []
     sample_outcomes = []
     for sample_vtx in sample['vertex_index']:
@@ -437,7 +437,7 @@ def temp_writes(treatments, outcomes):
     np.savetxt("temp_treatments.txt", treatments)
     np.savetxt("temp_outcomes.txt", outcomes)
 
-def run(init_processing, predict_only, predict_immediate, final_res_only, non_joint, all_x, seed)
+def run(init_processing, predict_only, predict_immediate, final_res_only, non_joint, all_x, seed):
 
     if(final_res_only):
         if(non_joint):
@@ -535,7 +535,7 @@ def main():
     predict_only = False
     predict_immediate = True
     final_res_only = False
-    non_joint = True
+    non_joint = False
     all_x = -1
     
     seed = 87
@@ -549,6 +549,6 @@ def main():
     #seed = 55
     #seed = 19
     run(init_processing, predict_only, predict_immediate, final_res_only, non_joint, all_x, seed)
-    
+
 if __name__ == '__main__':
     main()
