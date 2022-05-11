@@ -6,21 +6,50 @@ import numpy_indexed as npi
 from argparse import Namespace
 from sklearn.metrics import mean_absolute_error as mae, confusion_matrix
 import pickle
-from scipy.io import mmwrite
+from scipy.io import mmwrite, mmread
 import sys
 from os.path import exists
-
+from scipy import sparse
+from paican_pkg.paican import PAICAN
 
 
 def sigmoid_adj(x,a):
     return 1/(1 + np.exp(-1*(x-a)))
 
 def community_generation(graph, covariates, profiles):
+    comm_ct = 100
+    age_cat = []
+    id_arr = np.array(profiles['user_id'])
+    print(graph['vertex_index'])
+    if 'scaled_age' in covariates:
+        age_cat = np.where(profiles['scaled_age'] < 0., -1., 1.)
+        age_cat[np.isnan(profiles['scaled_age'])] = 0
+        age_cat[age_cat == -1] = 1
+
     adj_mat = np.zeros((len(graph['vertex_index']),len(graph['vertex_index'])))
     attrs = np.zeros((len(graph['vertex_index']),len(covariates)))
 
+    print('Writing attribute matrix')
     for i in range(len(graph['vertex_index'])):
-        cur_neighbors = graph["neighbours"][offsets_to_check[i]:offsets_to_check[i]+lengths_to_check[i]]
+        if(i % 100 == 0):
+            print('Node ' + str(i) + ' completed.')
+        cur_neighbors = graph['neighbours'][graph['offsets'][i]:graph['offsets'][i]+graph['lengths'][i]]
+        adj_mat[i][cur_neighbors] = 1
+
+        for k in range(len(covariates)):
+            if(covariates[k] == 'scaled_age'):
+                attrs[i][k] = age_cat[i]
+            else:
+                attrs[i][k] = profiles[covariates[k]][id_arr[i]]
+
+    A = sparse.csr_matrix(adj_mat)
+    X = sparse.csr_matrix(attrs)
+    
+    paican = PAICAN(A, X, comm_ct, verbose=True)
+    z_pr, ca_pr, cx_pr = paican.fit_predict()
+    np.savetxt('z_pr_tmp.txt',z_pr)
+    np.savetxt('ca_pr_tmp.txt',ca_pr)
+    np.savetxt('cx_pr_tmp.txt',cx_pr)
 
 def sample_graph(graph,seed):
     #Let's use p-sampling
@@ -233,7 +262,7 @@ def main():
     temp_writes(treatments,outcomes)
     print('Finished treatment and outcome simulated assignment')
 
-    communities = community_generation(graph, profiles, categories)
+    communities = community_generation(graph, categories, profiles)
     print('Finished community detection!')
 
     sample, sample_translation = sample_graph(graph,seed)
