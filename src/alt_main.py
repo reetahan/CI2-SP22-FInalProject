@@ -356,18 +356,18 @@ def temp_writes(treatments, outcomes):
 def main():
 
     init_processing = False
-    predict_only = True
-    final_res_only = False
-    non_joint = False
+    predict_only = False
+    final_res_only = True
+    non_joint = True
     #seed = 87
     #seed = 42
     #seed = 103
     #seed = 65
-    seed = 233
+    #seed = 233
     #seed = 32
     #seed = 83
     #seed = 44
-    #seed = 55
+    seed = 55
     #seed = 19
 
     if(final_res_only):

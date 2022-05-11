@@ -15,13 +15,19 @@ def sigmoid_adj(x,a):
     return 1/(1 + np.exp(-1*(x-a)))
 
 def non_joint_embedding(graph,features, treatment, outcomes, sample, sample_translation, training_nodes, \
-    testing_nodes, seed):
+    testing_nodes, seed, all_x):
     
     to_save = True
     automl_file = "output/non_joint_" + str(seed) + "_automl.pkl"
     embed_file = "output/non_joint_" + str(seed) + "_cur_embed.csv"
     sample_treatments_file = "output/non_joint_" + str(seed) + "_s_t.txt"
     sample_outcomes_file = "output/non_joint_" + str(seed) + "_s_o.txt"
+
+    if(all_x == 0 or all_x == 1):
+        automl_file = "output/non_joint_" + str(all_x) + "_" + str(seed) + "_automl.pkl"
+        embed_file = "output/non_joint_" + str(all_x) + "_" + str(seed) + "_cur_embed.csv"
+        sample_treatments_file = "output/non_joint_" + str(all_x) + "_" + str(seed) + "_s_t.txt"
+        sample_outcomes_file = "output/non_joint_" + str(all_x) + "_" + str(seed) + "_s_o.txt"
 
     
     total_epochs = 16
@@ -100,7 +106,7 @@ def run_embedded_training(treatments, embedding, outcomes, training_nodes, testi
             "metric": 'mae',
             "estimator_list": 'auto',
             "task": 'classification',
-            "time_budget": 250,
+            "time_budget": 240,
             "log_file_name": "./nj_automl_factual.log",
             }
     automl.fit(X_train=X_train, y_train=y_train,**automl_settings)
@@ -135,7 +141,7 @@ def gen_embed_train(sample,sample_translation,profiles, covariates):
     return raw_sample_graph, cov_data
 
 def asne_wrapper(graph,features, treatment, outcomes, sample, sample_translation, training_nodes, \
-    testing_nodes, seed):
+    testing_nodes, seed, all_x):
     
 
     epoch_file = str(seed) + "_epoch_info.txt"
@@ -144,6 +150,12 @@ def asne_wrapper(graph,features, treatment, outcomes, sample, sample_translation
     sample_treatments_file = "output/" + str(seed) + "_s_t.txt"
     sample_outcomes_file = "output/" + str(seed) + "_s_o.txt"
 
+    if(all_x == 0 or all_x == 1):
+        epoch_file = str(all_x) + "_" + str(seed) + "_epoch_info.txt"
+        automl_file = "output/" + str(all_x) + "_" + str(seed) + "_automl.pkl"
+        embed_file = "output/" + str(all_x) + "_" + str(seed) + "_cur_embed.csv"
+        sample_treatments_file = "output/" + str(all_x) + "_" + str(seed) + "_s_t.txt"
+        sample_outcomes_file = "output/" + str(all_x) + "_" + str(seed) + "_s_o.txt"
     
     total_epochs = 15
     sample_treatments = []
@@ -245,7 +257,7 @@ def gen_covar_coeff(covariates, seed):
     np.random.seed(seed)
     return np.random.uniform(size=len(covariates))
 
-def assign_treatments(profiles,covariates, cov_coeff, seed):
+def assign_treatments(profiles,covariates, cov_coeff, seed,all_x): 
     np.random.seed(seed)
     
     age_cat = []
@@ -264,6 +276,10 @@ def assign_treatments(profiles,covariates, cov_coeff, seed):
 
     propensities = propensity_linear_function(values,cov_coeff)
     treatments = np.random.binomial(1,propensities)
+    if(all_x == 0):
+        treatments = np.zeros(len(propensities))
+    if(all_x == 1):
+        treatments = np.ones(len(propensities))
     return treatments
 
 def assign_outcomes(treatments,graph,profiles, covariates, cov_coeff, seed):
@@ -356,14 +372,15 @@ def temp_writes(treatments, outcomes):
 def main():
 
     init_processing = False
-    predict_only = True
+    predict_only = False
     final_res_only = False
-    non_joint = False
-    #seed = 87
+    non_joint = True
+    all_x = 0
+    seed = 87
     #seed = 42
     #seed = 103
     #seed = 65
-    seed = 233
+    #seed = 233
     #seed = 32
     #seed = 83
     #seed = 44
@@ -403,7 +420,7 @@ def main():
     profiles = second_profile_process(profiles)
     print('Finished graph input processing')
 
-    treatments = assign_treatments(profiles,categories, cat_coeff, seed)
+    treatments = assign_treatments(profiles,categories, cat_coeff, seed,all_x)
     outcomes = assign_outcomes(treatments, graph, profiles, categories, cat_coeff, seed)
     temp_writes(treatments,outcomes)
     print('Finished treatment and outcome simulated assignment')
@@ -418,14 +435,14 @@ def main():
 
     if(non_joint):
         model_f, embedding_f, sample_treatments, sample_outcomes = non_joint_embedding(graph_embed, graph_features,treatments, \
-        outcomes,sample,sample_translation, training_nodes, testing_nodes, seed)
+        outcomes,sample,sample_translation, training_nodes, testing_nodes, seed, all_x)
         print('Finished training')
 
         prediction(sample_treatments,model_f,embedding_f,"output/non_joint_predicted_estimators.txt")
         print('Finished predictions on sample')
     else:
         model_f, embedding_f, sample_treatments, sample_outcomes = asne_wrapper(graph_embed, graph_features,treatments, \
-            outcomes,sample,sample_translation, training_nodes, testing_nodes, seed)
+            outcomes,sample,sample_translation, training_nodes, testing_nodes, seed, all_x)
         print('Finished training')
 
         prediction(sample_treatments,model_f,embedding_f,"output/predicted_estimators.txt")
