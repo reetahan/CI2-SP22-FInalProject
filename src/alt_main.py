@@ -11,15 +11,62 @@ import sys
 from os.path import exists
 from scipy import sparse
 from paican_pkg.paican import PAICAN
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import mean_absolute_error as mae, confusion_matrix, f1_score, accuracy_score, auc, roc_curve
+from sknetwork.clustering import Louvain
 
 
 def sigmoid_adj(x,a):
     return 1/(1 + np.exp(-1*(x-a)))
 
-def community_generation(graph, covariates, profiles):
-    comm_ct = 100
+def run_regression(X_train, X_test, y_train, y_test,seed, predict_outfile):
+    clf = LogisticRegression(random_state=seed)
+    clf.fit(X_train,y_train)
+    y_pred = clf.predict(X_test)
+
+    cal_mae = mae(y_test,y_pred)
+    acc = accuracy_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
+    cf_matrix = confusion_matrix(y_test, y_pred)
+    print('MAE: ' + str(cal_mae))
+    print('Confusion Matrix: ' + str(cf_matrix))
+    print('Accuracy: ' + str(acc))
+    print('F1-Score: ' + str(f1))
+
+    val = clf.coef_[0][0]
+    v_coeff =  np.e**(val) - 1
+    print(v_coeff)
+
+    if(not exists(predict_outfile)):
+        with open(predict_outfile, 'w+') as fp:
+            pass
+    current_est_list = np.loadtxt(predict_outfile)
+    current_est_list = np.append(current_est_list,v_coeff)
+    np.savetxt(predict_outfile,current_est_list)
+
+
+
+def generic_community_generation(graph,covariates, profiles, comm_outfile):
+    adj_mat = np.zeros((len(graph['vertex_index']),len(graph['vertex_index'])))
+    for i in range(len(graph['vertex_index'])):
+        #if(i % 100 == 0):
+        #    print('Node ' + str(i) + ' completed.')
+        cur_neighbors = graph['neighbours'][graph['offsets'][i]:graph['offsets'][i]+graph['lengths'][i]]
+        adj_mat[i][cur_neighbors] = 1
+    print(adj_mat)
+
+    algo = Louvain()
+    algo.fit(adj_mat)
+    labels = algo.labels_
+
+    np.savetxt(comm_outfile,labels)
+    return labels
+
+def community_generation(graph, sample_translation, covariates, profiles, comm_outfile):
+    comm_ct = 10
     age_cat = []
     id_arr = np.array(profiles['user_id'])
+    print(id_arr)
     print(graph['vertex_index'])
     if 'scaled_age' in covariates:
         age_cat = np.where(profiles['scaled_age'] < 0., -1., 1.)
@@ -31,8 +78,8 @@ def community_generation(graph, covariates, profiles):
 
     print('Writing attribute matrix')
     for i in range(len(graph['vertex_index'])):
-        if(i % 100 == 0):
-            print('Node ' + str(i) + ' completed.')
+        #if(i % 100 == 0):
+            #print('Node ' + str(i) + ' completed.')
         cur_neighbors = graph['neighbours'][graph['offsets'][i]:graph['offsets'][i]+graph['lengths'][i]]
         adj_mat[i][cur_neighbors] = 1
 
@@ -40,24 +87,71 @@ def community_generation(graph, covariates, profiles):
             if(covariates[k] == 'scaled_age'):
                 attrs[i][k] = age_cat[i]
             else:
-                attrs[i][k] = profiles[covariates[k]][id_arr[i]]
+                attrs[i][k] = profiles[covariates[k]][id_arr[sample_translation[i]]]
 
     A = sparse.csr_matrix(adj_mat)
     X = sparse.csr_matrix(attrs)
     
     paican = PAICAN(A, X, comm_ct, verbose=True)
     z_pr, ca_pr, cx_pr = paican.fit_predict()
-    np.savetxt('z_pr_tmp.txt',z_pr)
+    np.savetxt(comm_outfile,z_pr)
     np.savetxt('ca_pr_tmp.txt',ca_pr)
     np.savetxt('cx_pr_tmp.txt',cx_pr)
 
-def sample_graph(graph,seed):
-    #Let's use p-sampling
+    return z_pr
+
+
+def alt_sample_graph(graph,seed,ratio):
     np.random.seed(seed)
-    p = 0.4
-    vtx_sel = np.random.binomial(1,[p] * (len(graph['vertex_index'])))
-    idxs = np.where(vtx_sel == 1)
-    sampled_vtxs = graph['vertex_index'][idxs]
+    p = ratio
+    vtx_seed = np.random.choice(graph['vertex_index'])
+    bfs_queue = [vtx_seed]
+    new_edge_list = []
+    new_vtx_list = [vtx_seed]
+    visited = [vtx_seed]
+    itr_ct = 0
+    while(len(bfs_queue) > 0):
+        print('Seen: ' + str(len(visited)) + '/' + str(len(graph['vertex_index'])))
+        print('Cur Queue Length: ' + str(len(bfs_queue)))
+        cur = bfs_queue.pop(0)
+        poss_neighbors = graph["neighbours"][graph["offsets"][cur]:graph["offsets"][cur] + graph["lengths"][cur]]
+        idxs = np.where(np.random.binomial(1,[p]*len(poss_neighbors)) == 1)
+        final_neighbors = poss_neighbors[idxs]
+        for entry in final_neighbors:
+            if([cur, entry] not in new_edge_list):
+                new_edge_list.append([cur, entry])
+            if(entry not in new_vtx_list):
+                new_vtx_list.append(entry)
+            if(entry not in visited):
+                bfs_queue.append(entry)
+        for pn in poss_neighbors:
+            if(pn not in visited):
+                visited.append(pn)
+        itr_ct = itr_ct + 1
+
+
+    rev_translation = {}
+    translation = dict(zip(np.arange(len(new_vtx_list)), new_vtx_list))
+    for key in translation:
+        rev_translation[translation[key]] = key
+    adj_edge_list = []
+    for edge in new_edge_list:
+        adj_edge_list.append([rev_translation[edge[0]], rev_translation[edge[1]]])
+    new_adj_list = preprocess_packed_adjacency_list(np.array(adj_edge_list))
+
+    sample_graph = {'neighbours': new_adj_list['neighbours'],
+        'offsets': new_adj_list['offsets'],
+        'lengths': new_adj_list['lengths'],
+        'vertex_index': new_adj_list['vertex_index'],
+        'weights': new_adj_list['weights'],
+        'edge_list': new_edge_list}
+    return sample_graph, translation
+
+def sample_graph(graph,communities,seed):
+    np.random.seed(seed)
+    comm = np.random.choice(communities)
+    comm_idx = np.where(communities == comm)
+    sampled_vtxs = graph["vertex_index"][comm_idx]
 
 
     offsets_to_check = graph["offsets"][sampled_vtxs]
@@ -112,6 +206,15 @@ def gen_covar_coeff(covariates, seed):
     np.random.seed(seed)
     return np.random.uniform(size=len(covariates))
 
+def get_v_treatments(raw_treatments, graph):
+    V = []
+    for i in range(len(raw_treatments)):
+        cur_neighbors = graph['neighbours'][graph['offsets'][i]:graph['offsets'][i]+graph['lengths'][i]]
+        v_i = (np.sum(raw_treatments[cur_neighbors]) + raw_treatments[i])/(len(cur_neighbors)+1)
+        V.append(v_i)
+    V = np.array(V)
+    return V
+
 def assign_treatments(profiles,covariates, cov_coeff, seed,all_x): 
     np.random.seed(seed)
     
@@ -139,7 +242,7 @@ def assign_treatments(profiles,covariates, cov_coeff, seed,all_x):
 
 def assign_outcomes(treatments,graph,profiles, covariates, cov_coeff, seed):
     np.random.seed(seed)
-    confounding_alpha = np.random.uniform()
+    confounding_alpha = 0.7#np.random.uniform()
     age_cat = []
     if 'scaled_age' in covariates:
         age_cat = np.where(profiles['scaled_age'] < 0., -1., 1.)
@@ -179,6 +282,40 @@ def train_test_node_split(sample,seed):
 
     return train_vtxs, test_vtxs
 
+def gen_data(sample, translation, treatments, outcomes, covariates, profiles, training_nodes, testing_nodes):
+    orig_vts = [translation[x] for x in sample['vertex_index']]
+    V = treatments[orig_vts]
+    O = outcomes[orig_vts]
+
+    age_cat = []
+    id_arr = np.array(profiles['user_id'])
+    if 'scaled_age' in covariates:
+        age_cat = np.where(profiles['scaled_age'] < 0., -1., 1.)
+        age_cat[np.isnan(profiles['scaled_age'])] = 0
+        age_cat[age_cat == -1] = 1
+
+    attrs = np.zeros((len(sample['vertex_index']),len(covariates)))
+
+    for i in range(len(sample['vertex_index'])):
+        #if(i % 100 == 0):
+        #    print('Node ' + str(i) + ' completed.')
+
+        for k in range(len(covariates)):
+            if(covariates[k] == 'scaled_age'):
+                attrs[i][k] = age_cat[translation[sample['vertex_index'][i]]]
+            else:
+                attrs[i][k] = profiles[covariates[k]][id_arr[translation[sample['vertex_index'][i]]]]
+    data_dict={'treatments': V}
+    for i in range(len(attrs[0])):
+        key = "attr_" + str(i)
+        data_dict[key] = attrs[:,i]
+    X = pd.DataFrame(data_dict)
+    X_train = X.loc[training_nodes]
+    X_test = X.loc[testing_nodes]
+    y_train = outcomes[training_nodes]
+    y_test = outcomes[testing_nodes]
+
+    return X_train, X_test, y_train, y_test
 
 def one_time_graph_processing():
     edges, profiles = preprocess_data()
@@ -224,30 +361,13 @@ def temp_writes(treatments, outcomes):
     np.savetxt("temp_treatments.txt", treatments)
     np.savetxt("temp_outcomes.txt", outcomes)
 
-def main():
-
-    init_processing = False
-    final_res_only = False
-    all_x = 0
-    seed = 87
-    #seed = 42
-    #seed = 103
-    #seed = 65
-    #seed = 233
-    #seed = 32
-    #seed = 83
-    #seed = 44
-    #seed = 55
-    #seed = 19
+def run(init_processing, load_comms,predict_outfile,comm_file,final_res_only,categories,seed, ratio, all_x):
 
     if(final_res_only):
-        if(non_joint):
-            final_result("output/non_joint_predicted_estimators.txt")
-        else:
-            final_result("output/predicted_estimators.txt")
+        final_result(predict_outfile)
+        print('Finished')
         return
-
-    categories = ['I_like_books','I_like_movies','I_like_music','relation_to_smoking','scaled_age']
+        
     cat_coeff = gen_covar_coeff(categories, seed)
 
     if(init_processing):
@@ -258,27 +378,51 @@ def main():
     print('Finished graph input processing')
 
     treatments = assign_treatments(profiles,categories, cat_coeff, seed,all_x)
+    treatments = get_v_treatments(treatments, graph)
     outcomes = assign_outcomes(treatments, graph, profiles, categories, cat_coeff, seed)
     temp_writes(treatments,outcomes)
     print('Finished treatment and outcome simulated assignment')
 
-    communities = community_generation(graph, categories, profiles)
+    if(load_comms):
+        communities = np.loadtxt(comm_file)
+    else:
+        communities = generic_community_generation(graph, categories, profiles, comm_file)
+    #communities = community_generation(sample, sample_translation, categories, profiles)
     print('Finished community detection!')
 
-    sample, sample_translation = sample_graph(graph,seed)
+    sample, sample_translation = sample_graph(graph,communities,seed)
     print('Finished sampling')
-
-    
-
-
     
     training_nodes, testing_nodes = train_test_node_split(sample,seed)
     print('Finished train-test split')
 
-    print(sample)
-    print(training_nodes)
+    X_train, X_test, y_train, y_test = gen_data(sample, sample_translation, treatments, outcomes, categories, profiles, training_nodes, testing_nodes)
+    peer_coeff = run_regression(X_train, X_test, y_train, y_test, seed, predict_outfile)
+    print('Finished')
 
-    
+def main():
+    init_processing = False
+    load_comms = True
+    predict_outfile = "output/alt_main_coeffs.txt"
+    comm_file = "output/graph_communities.txt"
+    final_res_only = False
+    all_x = -1
+    ratio = 0.1
+    categories = ['I_like_books','I_like_movies','I_like_music','relation_to_smoking','scaled_age']
+    seed_list = [87,42,103,95,233,32,83,44,55,199]
+    #seed = 87
+    #seed = 42
+    #seed = 103
+    #seed = 65
+    #seed = 233
+    #seed = 32
+    #seed = 83
+    #seed = 44
+    #seed = 55
+    #seed = 19
+    for seed in seed_list:
+        print('Seed: ' + str(seed))
+        run(init_processing, load_comms,predict_outfile,comm_file,final_res_only,categories,seed, ratio, all_x)
 
 if __name__ == '__main__':
     main()

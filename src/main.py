@@ -320,7 +320,7 @@ def get_v_treatments(raw_treatments, graph):
     V = []
     for i in range(len(raw_treatments)):
         cur_neighbors = graph['neighbours'][graph['offsets'][i]:graph['offsets'][i]+graph['lengths'][i]]
-        v_i = np.sum(raw_treatments[cur_neighbors])/len(cur_neighbors)
+        v_i = (np.sum(raw_treatments[cur_neighbors]) + raw_treatments[i])/(len(cur_neighbors)+1)
         V.append(v_i)
     V = np.array(V)
     return V
