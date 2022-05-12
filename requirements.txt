@@ -1,0 +1,12 @@
+FLAML==1.0.1
+matplotlib==3.1.2
+mkl_random==1.2.2
+networkx==2.6.3
+numpy==1.17.4
+numpy_indexed==0.3.5
+pandas==1.4.2
+scikit_learn==1.1.0
+scikit_network==0.26.0
+scipy==1.8.0
+texttable==1.6.4
+tqdm==4.64.0
